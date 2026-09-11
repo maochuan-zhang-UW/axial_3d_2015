@@ -5,7 +5,7 @@ axial magma chamber (AMC) roof, the caldera rim, and April 23–25, 2015
 earthquake seismicity (existing catalog vs. new matched-filter detections),
 in one rotatable scene with a day-by-day reveal slider.
 
-**Live page**: https://maochuan-zhang-UW.github.io/axial_3d_2015/
+**Live page**: https://maochuan-zhang-uw.github.io/axial_3d_2015/
 (GitHub Pages serves `index.html` directly — open it in any browser)
 
 ![preview](preview.png)
