@@ -1,0 +1,217 @@
+<title>Axial Seamount Depths</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#0b0f17;
+    --surface:#131a26;
+    --surface-2:#1b2433;
+    --border:#2a3547;
+    --text:#e7ecf3;
+    --text-muted:#8996ac;
+    --accent-magma:#ff7a45;
+    --accent-fault:#4fd1c5;
+    --accent-catalog:#6c8cbf;
+    --font-display:'Oxanium', system-ui, sans-serif;
+    --font-body:'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', 'SF Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--font-body);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:20px;
+    padding:14px 20px; background:var(--surface);
+    border-bottom:1px solid var(--border); flex-shrink:0;
+    flex-wrap:wrap;
+  }
+  h1{
+    font-family:var(--font-display); font-weight:700; font-size:19px;
+    letter-spacing:.02em; margin:0; color:var(--text); text-wrap:balance;
+    white-space:nowrap;
+  }
+  .subtitle{
+    font-size:12.5px; color:var(--text-muted); font-family:var(--font-mono);
+    white-space:nowrap;
+  }
+  .legend{
+    display:flex; gap:14px; margin-left:auto; flex-wrap:wrap;
+  }
+  .chip{
+    display:flex; align-items:center; gap:7px; font-size:12.5px;
+    color:var(--text-muted); font-family:var(--font-mono);
+    padding:5px 10px; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:99px; white-space:nowrap;
+  }
+  .swatch{width:9px; height:9px; border-radius:50%; flex-shrink:0;}
+  #plot{flex:1; min-height:0;}
+  footer{
+    display:flex; align-items:center; gap:16px;
+    padding:12px 20px; background:var(--surface);
+    border-top:1px solid var(--border); flex-shrink:0; flex-wrap:wrap;
+  }
+  .slider-label{
+    font-family:var(--font-mono); font-size:12.5px; color:var(--text-muted);
+    min-width:150px;
+  }
+  .slider-label b{color:var(--text); font-weight:500;}
+  input[type=range]{
+    flex:1; max-width:420px; accent-color:var(--accent-magma);
+    height:4px; cursor:pointer;
+  }
+  .stat{
+    font-family:var(--font-mono); font-size:12.5px; color:var(--text-muted);
+    white-space:nowrap;
+  }
+  .stat b{color:var(--text); font-weight:500; font-variant-numeric:tabular-nums;}
+  .hint{
+    margin-left:auto; font-size:11.5px; color:var(--text-muted);
+    font-family:var(--font-mono);
+  }
+  @media (max-width: 760px){
+    .legend{display:none;}
+    .hint{display:none;}
+  }
+</style>
+
+<header>
+  <h1>Axial Seamount &mdash; Depths</h1>
+  <div class="subtitle">Caldera faults · AMC roof · Apr 23&ndash;25 2015 seismicity</div>
+  <div class="legend">
+    <div class="chip"><span class="swatch" style="background:var(--accent-fault)"></span>Fault walls</div>
+    <div class="chip"><span class="swatch" style="background:var(--accent-magma); opacity:.6"></span>AMC roof</div>
+    <div class="chip"><span class="swatch" style="background:var(--accent-catalog)"></span>Existing catalog</div>
+    <div class="chip"><span class="swatch" style="background:var(--accent-magma)"></span>New detections</div>
+  </div>
+</header>
+
+<div id="plot"></div>
+
+<footer>
+  <div class="slider-label">Show through: <b id="day-readout">Apr 25</b></div>
+  <input type="range" id="day-slider" min="0" max="2" step="1" value="2">
+  <div class="stat">Catalog <b id="stat-catalog">0</b></div>
+  <div class="stat">New detections <b id="stat-new">0</b></div>
+  <div class="hint">drag to rotate · scroll to zoom · shift-drag to pan</div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/4.1.0/plotly.min.js"></script>
+<script type="application/json" id="data-payload">__DATA_JSON__</script>
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:60px;left:20px;right:20px;padding:16px;background:#3a0d0d;color:#fff;font-family:monospace;font-size:13px;z-index:9999;white-space:pre-wrap;border-radius:8px;';
+  d.textContent = 'JS ERROR: ' + msg + '\n  at ' + src + ':' + line + ':' + col + (err && err.stack ? '\n' + err.stack : '');
+  document.body.appendChild(d);
+  return false;
+};
+</script>
+<script>
+const DATA = JSON.parse(document.getElementById('data-payload').textContent);
+
+const DAYS = ["2015-04-23", "2015-04-24", "2015-04-25"];
+const DAY_LABELS = ["Apr 23", "Apr 24", "Apr 25"];
+
+function filterByDay(obj, maxIdx) {
+  const cutoff = DAYS[maxIdx];
+  const idx = [];
+  for (let i = 0; i < obj.day.length; i++) {
+    if (obj.day[i] <= cutoff) idx.push(i);
+  }
+  return {
+    x: idx.map(i => obj.x[i]),
+    y: idx.map(i => obj.y[i]),
+    z: idx.map(i => obj.z[i]),
+  };
+}
+
+const westWall = {
+  type: 'scatter3d', mode: 'markers', name: 'West wall',
+  x: DATA.west_wall.x, y: DATA.west_wall.y, z: DATA.west_wall.z,
+  marker: { size: 2.5, color: '#4fd1c5', opacity: 0.55 },
+  hoverinfo: 'skip', legendgroup: 'fault', showlegend: false,
+};
+const eastWall = {
+  type: 'scatter3d', mode: 'markers', name: 'East wall',
+  x: DATA.east_wall.x, y: DATA.east_wall.y, z: DATA.east_wall.z,
+  marker: { size: 2, color: '#4fd1c5', opacity: 0.35 },
+  hoverinfo: 'skip', legendgroup: 'fault', showlegend: false,
+};
+const amcSurface = {
+  type: 'surface', name: 'AMC roof',
+  x: DATA.amc.x, y: DATA.amc.y, z: DATA.amc.z,
+  colorscale: [[0, '#3a1a0a'], [0.5, '#b8501f'], [1, '#ffb37a']],
+  showscale: false, opacity: 0.5, hoverinfo: 'skip',
+};
+const rim = {
+  type: 'scatter3d', mode: 'lines', name: 'Caldera rim',
+  x: DATA.caldera_rim.x, y: DATA.caldera_rim.y,
+  z: DATA.caldera_rim.x.map(() => 0),
+  line: { color: '#8996ac', width: 3 },
+  hoverinfo: 'skip',
+};
+
+function makeCatalogTrace(d) {
+  return {
+    type: 'scatter3d', mode: 'markers', name: 'Existing catalog',
+    x: d.x, y: d.y, z: d.z,
+    marker: { size: 2, color: '#6c8cbf', opacity: 0.45 },
+    hovertemplate: 'depth %{z:.2f} km<extra>catalog</extra>',
+  };
+}
+function makeNewTrace(d) {
+  return {
+    type: 'scatter3d', mode: 'markers', name: 'New detections',
+    x: d.x, y: d.y, z: d.z,
+    marker: { size: 2.6, color: '#ff7a45', opacity: 0.85 },
+    hovertemplate: 'depth %{z:.2f} km<extra>new detection</extra>',
+  };
+}
+
+const initCat = filterByDay(DATA.catalog, 2);
+const initNew = filterByDay(DATA.new_detections, 2);
+
+const traces = [westWall, eastWall, amcSurface, rim,
+               makeCatalogTrace(initCat), makeNewTrace(initNew)];
+
+const layout = {
+  paper_bgcolor: '#0b0f17',
+  plot_bgcolor: '#0b0f17',
+  font: { color: '#e7ecf3', family: 'IBM Plex Sans, sans-serif' },
+  margin: { l: 0, r: 0, t: 0, b: 0 },
+  showlegend: false,
+  scene: {
+    xaxis: { title: 'East (km)', color: '#8996ac', gridcolor: '#2a3547', zerolinecolor: '#2a3547', backgroundcolor: '#0b0f17' },
+    yaxis: { title: 'North (km)', color: '#8996ac', gridcolor: '#2a3547', zerolinecolor: '#2a3547', backgroundcolor: '#0b0f17' },
+    zaxis: { title: 'Depth (km)', color: '#8996ac', gridcolor: '#2a3547', zerolinecolor: '#2a3547', backgroundcolor: '#0b0f17', autorange: 'reversed' },
+    camera: { eye: { x: 1.3, y: -1.5, z: 0.9 } },
+    aspectmode: 'manual',
+    aspectratio: { x: 1, y: 1.15, z: 0.55 },
+  },
+};
+
+Plotly.newPlot('plot', traces, layout, { displaylogo: false, responsive: true });
+
+function updateStats(cat, det) {
+  document.getElementById('stat-catalog').textContent = cat.x.length.toLocaleString();
+  document.getElementById('stat-new').textContent = det.x.length.toLocaleString();
+}
+updateStats(initCat, initNew);
+
+const slider = document.getElementById('day-slider');
+const readout = document.getElementById('day-readout');
+slider.addEventListener('input', () => {
+  const idx = Math.min(parseInt(slider.value, 10), 2);
+  readout.textContent = DAY_LABELS[idx];
+  const cat = filterByDay(DATA.catalog, idx);
+  const det = filterByDay(DATA.new_detections, idx);
+  Plotly.restyle('plot', { x: [cat.x], y: [cat.y], z: [cat.z] }, [4]);
+  Plotly.restyle('plot', { x: [det.x], y: [det.y], z: [det.z] }, [5]);
+  updateStats(cat, det);
+});
+
+window.addEventListener('resize', () => Plotly.Plots.resize('plot'));
+</script>
