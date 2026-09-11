@@ -30,7 +30,9 @@ group this project sits in (see `axial_calderaRim.m` in that same
 
 ## What's plotted
 
-- **West/east caldera walls** — point clouds from the credited data above
+- **West/east caldera walls** — masked `Surface` traces, interpolated from
+  the credited scattered point data above onto a regular grid (cells outside
+  the data's real footprint are left blank rather than extrapolated)
 - **AMC roof** — a `Surface` trace, regridded from the Arnulf et al. reflector
   depth grid onto this page's local km frame
 - **Caldera rim** — outline, drawn at the seafloor reference level

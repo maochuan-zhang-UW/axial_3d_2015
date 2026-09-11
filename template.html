@@ -92,7 +92,7 @@
 
 <footer>
   <div class="slider-label">Show through: <b id="day-readout">Apr 25</b></div>
-  <input type="range" id="day-slider" min="0" max="2" step="1" value="2">
+  <input type="range" id="day-slider" min="0" max="2" step="1" value="2" aria-label="Show data through day">
   <div class="stat">Catalog <b id="stat-catalog">0</b></div>
   <div class="stat">New detections <b id="stat-new">0</b></div>
   <div class="hint">drag to rotate · scroll to zoom · shift-drag to pan</div>
@@ -112,14 +112,16 @@ window.onerror = function(msg, src, line, col, err) {
 <script>
 const DATA = JSON.parse(document.getElementById('data-payload').textContent);
 
-const DAYS = ["2015-04-23", "2015-04-24", "2015-04-25"];
-const DAY_LABELS = ["Apr 23", "Apr 24", "Apr 25"];
+const DAY_LABELS = DATA.days.map(d => {
+  const [, m, day] = d.split('-');
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(day, 10)}`;
+});
 
 function filterByDay(obj, maxIdx) {
-  const cutoff = DAYS[maxIdx];
   const idx = [];
-  for (let i = 0; i < obj.day.length; i++) {
-    if (obj.day[i] <= cutoff) idx.push(i);
+  for (let i = 0; i < obj.day_idx.length; i++) {
+    if (obj.day_idx[i] <= maxIdx) idx.push(i);
   }
   return {
     x: idx.map(i => obj.x[i]),
@@ -128,23 +130,24 @@ function filterByDay(obj, maxIdx) {
   };
 }
 
+const wallColorscale = [[0, '#0e7a70'], [0.5, '#2dd4bf'], [1, '#a7f3ea']];
 const westWall = {
-  type: 'scatter3d', mode: 'markers', name: 'West wall',
+  type: 'surface', name: 'West wall',
   x: DATA.west_wall.x, y: DATA.west_wall.y, z: DATA.west_wall.z,
-  marker: { size: 2.5, color: '#4fd1c5', opacity: 0.55 },
+  colorscale: wallColorscale, showscale: false, opacity: 1,
   hoverinfo: 'skip', legendgroup: 'fault', showlegend: false,
 };
 const eastWall = {
-  type: 'scatter3d', mode: 'markers', name: 'East wall',
+  type: 'surface', name: 'East wall',
   x: DATA.east_wall.x, y: DATA.east_wall.y, z: DATA.east_wall.z,
-  marker: { size: 2, color: '#4fd1c5', opacity: 0.35 },
+  colorscale: wallColorscale, showscale: false, opacity: 1,
   hoverinfo: 'skip', legendgroup: 'fault', showlegend: false,
 };
 const amcSurface = {
   type: 'surface', name: 'AMC roof',
   x: DATA.amc.x, y: DATA.amc.y, z: DATA.amc.z,
-  colorscale: [[0, '#3a1a0a'], [0.5, '#b8501f'], [1, '#ffb37a']],
-  showscale: false, opacity: 0.5, hoverinfo: 'skip',
+  colorscale: [[0, '#b8460f'], [0.5, '#f2731d'], [1, '#ffcb94']],
+  showscale: false, opacity: 1, hoverinfo: 'skip',
 };
 const rim = {
   type: 'scatter3d', mode: 'lines', name: 'Caldera rim',
@@ -171,8 +174,9 @@ function makeNewTrace(d) {
   };
 }
 
-const initCat = filterByDay(DATA.catalog, 2);
-const initNew = filterByDay(DATA.new_detections, 2);
+const lastDayIdx = DATA.days.length - 1;
+const initCat = filterByDay(DATA.catalog, lastDayIdx);
+const initNew = filterByDay(DATA.new_detections, lastDayIdx);
 
 const traces = [westWall, eastWall, amcSurface, rim,
                makeCatalogTrace(initCat), makeNewTrace(initNew)];
@@ -203,14 +207,29 @@ updateStats(initCat, initNew);
 
 const slider = document.getElementById('day-slider');
 const readout = document.getElementById('day-readout');
-slider.addEventListener('input', () => {
-  const idx = Math.min(parseInt(slider.value, 10), 2);
+slider.max = lastDayIdx;
+slider.value = lastDayIdx;
+readout.textContent = DAY_LABELS[lastDayIdx];
+
+let shownDayIdx = lastDayIdx;
+let pendingIdx = null;
+function applyDay(idx) {
   readout.textContent = DAY_LABELS[idx];
   const cat = filterByDay(DATA.catalog, idx);
   const det = filterByDay(DATA.new_detections, idx);
   Plotly.restyle('plot', { x: [cat.x], y: [cat.y], z: [cat.z] }, [4]);
   Plotly.restyle('plot', { x: [det.x], y: [det.y], z: [det.z] }, [5]);
   updateStats(cat, det);
+  shownDayIdx = idx;
+  pendingIdx = null;
+}
+// Coalesce to one restyle per animation frame, so dragging never queues
+// up more redraws of the ~25k-marker traces than the screen can show.
+slider.addEventListener('input', () => {
+  const idx = parseInt(slider.value, 10);
+  if (idx === shownDayIdx) return;
+  if (pendingIdx === null) requestAnimationFrame(() => applyDay(pendingIdx));
+  pendingIdx = idx;
 });
 
 window.addEventListener('resize', () => Plotly.Plots.resize('plot'));

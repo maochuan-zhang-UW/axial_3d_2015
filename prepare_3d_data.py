@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.io as sio
+from scipy.interpolate import griddata
 
 import catalog_io
 from magma_chamber import MagmaChamber
@@ -37,6 +38,7 @@ from plot_relocated import CALDERA_RIM, load
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAX_OFFSET_M = 2000.0
+COORD_DECIMALS = 4  # 0.1 m at this km scale - plenty, keeps JSON compact
 
 # Origin/scale matching axial_visuals' latlon2xy_no_rotate.m exactly, so
 # the borrowed fault-wall data (already in this frame) lines up with our
@@ -59,14 +61,34 @@ def local_to_latlon(x, y):
     return lat, lon
 
 
-def load_west_wall(path):
+def _round(values, decimals=COORD_DECIMALS):
+    return [round(float(v), decimals) for v in values]
+
+
+def grid_surface(x, y, z, nx, ny, decimals=COORD_DECIMALS):
+    """Interpolate scattered (x, y, z) samples onto a regular grid for a
+    Plotly Surface trace. griddata leaves cells outside the samples'
+    convex hull as NaN, which becomes JSON null - i.e. the surface is
+    automatically masked to the real footprint of the data, with no
+    fabricated extrapolation beyond it."""
+    x, y, z = np.asarray(x), np.asarray(y), np.asarray(z)
+    x_edges = np.linspace(x.min(), x.max(), nx)
+    y_edges = np.linspace(y.min(), y.max(), ny)
+    X, Y = np.meshgrid(x_edges, y_edges)
+    Z = griddata((x, y), z, (X, Y), method="linear")
+    z_list = [[None if np.isnan(v) else round(float(v), decimals) for v in row]
+              for row in Z]
+    return {"x": _round(x_edges), "y": _round(y_edges), "z": z_list}
+
+
+def load_west_wall(path, nx=60, ny=80):
     d = sio.loadmat(path)
     a = d["fit_x_y_z"]
-    return {"x": a[:, 0].tolist(), "y": a[:, 1].tolist(),
-           "z": (-a[:, 2]).tolist()}  # their z is negative-down -> flip
+    x, y, z = a[:, 0], a[:, 1], -a[:, 2]  # their z is negative-down -> flip
+    return grid_surface(x, y, z, nx, ny)
 
 
-def load_east_wall(path):
+def load_east_wall(path, nx=80, ny=100):
     d = sio.loadmat(path)
     felix = d["Felix"][0]
     lon = np.array([f["lon"].item() if f["lon"].size else np.nan
@@ -77,7 +99,7 @@ def load_east_wall(path):
                       for f in felix])
     ok = np.isfinite(lon) & np.isfinite(lat) & np.isfinite(depth)
     x, y = to_local(lat[ok], lon[ok])
-    return {"x": x.tolist(), "y": y.tolist(), "z": depth[ok].tolist()}
+    return grid_surface(x, y, depth[ok], nx, ny)
 
 
 def amc_surface(nx=60, ny=70):
@@ -90,23 +112,29 @@ def amc_surface(nx=60, ny=70):
     # NaN outside the imaged AMC extent -> JSON null (NaN isn't valid JSON
     # and breaks JSON.parse in the browser; Plotly Surface treats null as
     # a gap, which is exactly what "outside the imaged extent" means).
-    z_list = [[None if np.isnan(v) else v for v in row] for row in z]
-    return {"x": x_edges.tolist(), "y": y_edges.tolist(), "z": z_list}
+    z_list = [[None if np.isnan(v) else round(float(v), COORD_DECIMALS) for v in row]
+              for row in z]
+    return {"x": _round(x_edges), "y": _round(y_edges), "z": z_list}
 
 
 def caldera_rim_local():
     lon = np.array([p[0] for p in CALDERA_RIM])
     lat = np.array([p[1] for p in CALDERA_RIM])
     x, y = to_local(lat, lon)
-    return {"x": x.tolist(), "y": y.tolist()}
+    return {"x": _round(x), "y": _round(y)}
 
 
 def load_catalog_and_detections(args):
+    day0 = pd.Timestamp(args.catalog_start, tz="UTC")
+    n_days = (pd.Timestamp(args.catalog_end, tz="UTC") - day0).days
+    days = [(day0 + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+            for i in range(n_days)]
+
     events_df, picks_df, mag, reloc = catalog_io.load_all(args.data_dir)
     ev = events_df.copy()
     ev["time"] = pd.to_datetime(
         ev["time"].apply(lambda t: t.isoformat()), utc=True, format="ISO8601")
-    ev = ev[(ev["time"] >= pd.Timestamp(args.catalog_start, tz="UTC"))
+    ev = ev[(ev["time"] >= day0)
            & (ev["time"] < pd.Timestamp(args.catalog_end, tz="UTC"))]
     loc = reloc.reindex(ev.index)
     lat = loc["latitude"].to_numpy().copy()
@@ -122,11 +150,11 @@ def load_catalog_and_detections(args):
              & cat["longitude"].between(-130.15, -129.90)
              & cat["depth_km"].between(-3, 6)]
     cx, cy = to_local(cat["latitude"].to_numpy(), cat["longitude"].to_numpy())
+    cat_day_idx = ((cat["time"].dt.floor("D") - day0) / pd.Timedelta(days=1)
+                  ).astype(int)
     cat_out = {
-        "x": cx.tolist(), "y": cy.tolist(),
-        "z": cat["depth_km"].tolist(),
-        "day": cat["time"].dt.strftime("%Y-%m-%d").tolist(),
-        "time": cat["time"].dt.strftime("%Y-%m-%dT%H:%M:%S").tolist(),
+        "x": _round(cx), "y": _round(cy), "z": _round(cat["depth_km"]),
+        "day_idx": cat_day_idx.tolist(),
     }
 
     det = load(args.relocated)
@@ -135,18 +163,18 @@ def load_catalog_and_detections(args):
     is_outlier = (det["location_source"] == "relative") & (
         (horiz_m > MAX_OFFSET_M) | (det["dz_m"].abs() > MAX_OFFSET_M))
     det = det[~is_outlier].dropna(subset=["latitude", "longitude", "depth_km"])
-    det = det[(det["detect_time"] >= pd.Timestamp(args.catalog_start, tz="UTC"))
+    det = det[(det["detect_time"] >= day0)
              & (det["detect_time"] < pd.Timestamp(args.catalog_end, tz="UTC"))]
     dx, dy = to_local(det["latitude"].to_numpy(), det["longitude"].to_numpy())
+    det_day_idx = ((det["detect_time"].dt.floor("D") - day0)
+                  / pd.Timedelta(days=1)).astype(int)
     det_out = {
-        "x": dx.tolist(), "y": dy.tolist(),
-        "z": det["depth_km"].tolist(),
-        "day": det["detect_time"].dt.strftime("%Y-%m-%d").tolist(),
-        "time": det["detect_time"].dt.strftime("%Y-%m-%dT%H:%M:%S").tolist(),
+        "x": _round(dx), "y": _round(dy), "z": _round(det["depth_km"]),
+        "day_idx": det_day_idx.tolist(),
     }
     print(f"catalog: {len(cat_out['x'])} events, "
          f"new detections: {len(det_out['x'])} events")
-    return cat_out, det_out
+    return days, cat_out, det_out
 
 
 def main():
@@ -160,10 +188,11 @@ def main():
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
-    cat, det = load_catalog_and_detections(args)
+    days, cat, det = load_catalog_and_detections(args)
 
     out = {
         "origin": {"lat0": LAT0, "lon0": LON0},
+        "days": days,
         "west_wall": load_west_wall(args.west_wall),
         "east_wall": load_east_wall(args.east_wall),
         "amc": amc_surface(),
